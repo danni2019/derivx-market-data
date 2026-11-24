@@ -30,11 +30,13 @@ def map_datetime(dt_string: Any):
 
 
 def to_timestamp(d: pd.Series) -> pd.Series:
-    return pd.Series(d.values.astype(np.int64), index=d.index) / 1e9
+    values = pd.DatetimeIndex(pd.to_datetime(d, utc=True))
+    seconds = pd.Series(values.as_unit('ns').asi8 / 1e9, index=d.index)
+    return seconds.mask(values.isna())
 
 
 def from_timestamp(d: pd.Series) -> pd.Series:
-    return pd.Series(d.values.astype(np.float).astype('datetime64[s]'), index=d.index)
+    return pd.to_datetime(d.astype(float), unit='s')
 
 
 def datetime_mapping(dt_periods_sample: List[Tuple[datetime, datetime]], granular: int):

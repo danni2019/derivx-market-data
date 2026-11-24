@@ -1,6 +1,11 @@
 import re
+from datetime import time
+
+import numpy as np
 import pandas as pd
-from data.data_utils.data_screening import *
+
+from .data_screening import period_mark, point_mark
+from .datetime_wrangle import from_timestamp, to_timestamp
 
 
 def split_num_from_str(string_d: str):
@@ -23,9 +28,9 @@ def resample_tick_price_to_bar_md(data_s: pd.Series, level: str):
     :param level: 1min, 15min, 30min, 1d, etc
     :return: bar md data
     """
-    data_s.sort_index(ascending=True)
+    data_s = data_s.sort_index()
     frequency_dict = {
-        'min': 'T',
+        'min': 'min',
         'd': 'D'
     }
     freq_pair = split_num_from_str(level)
@@ -46,7 +51,7 @@ def simple_resample_md_data(df: pd.DataFrame, level: str):
     current_price_calling = 'last' if 'last' in df.columns else 'close'
     df = df.sort_index(ascending=True)[['open', 'low', 'high', current_price_calling]].copy()
     frequency_dict = {
-        'min': 'T',
+        'min': 'min',
         'd': 'D'
     }
     freq_pair = split_num_from_str(level)
@@ -84,55 +89,26 @@ def resample_md_data(df: pd.DataFrame, target_timeframe: str, label_at: str = "r
         if 'open_interest' in df.columns:
             target_df['open_interest'] = df['open_interest'].resample(target_timeframe, label=label_at, closed=close_at).last()
     else:
-        df = df.reset_index(drop=False).set_index('trading_date').sort_values(by='datetime', ascending=True)
-        target_df = df[['open', 'datetime']].groupby(df.index).apply(
-            lambda x: x[x['datetime'] == x['datetime'].min()][['open']]
-        ).reset_index(level=0, drop=True)
-        target_df['high'] = df[['high', 'datetime']].groupby(df.index).apply(
-            lambda x: x['high'].max()
-        )
-        target_df['low'] = df[['low', 'datetime']].groupby(df.index).apply(
-            lambda x: x['low'].min()
-        )
-        if 'close' in df.columns:
-            target_df['close'] = df[['close', 'datetime']].groupby(df.index).apply(
-                lambda x: x[x['datetime'] == x['datetime'].max()]['close']
-            ).reset_index(level=0, drop=True)
-        if 'last' in df.columns:
-            target_df['last'] = df[['last', 'datetime']].groupby(df.index).apply(
-                lambda x: x[x['datetime'] == x['datetime'].max()]['last']
-            ).reset_index(level=0, drop=True)
-        if 'pre_close' in df.columns:
-            target_df['pre_close'] = df[['pre_close', 'datetime']].groupby(df.index).apply(
-                lambda x: x[x['datetime'] == x['datetime'].min()]['pre_close']
-            ).reset_index(level=0, drop=True)
-        if 'volume' in df.columns:
-            target_df['volume'] = df[['volume', 'datetime']].groupby(df.index).apply(
-                lambda x: x[x['datetime'] == x['datetime'].max()]['volume']
-            ).reset_index(level=0, drop=True) if not sum else \
-                df[['volume', 'datetime']].groupby(df.index).apply(
-                    lambda x: x['volume'].sum()
-                )
-        if 'turnover' in df.columns:
-            target_df['turnover'] = df[['turnover', 'datetime']].groupby(df.index).apply(
-                lambda x: x[x['datetime'] == x['datetime'].max()]['turnover']
-            ).reset_index(level=0, drop=True) if not sum else \
-                df[['turnover', 'datetime']].groupby(df.index).apply(
-                    lambda x: x['turnover'].sum()
-                )
-        if 'open_interest' in df.columns:
-            target_df['open_interest'] = df[['open_interest', 'datetime']].groupby(df.index).apply(
-                lambda x: x[x['datetime'] == x['datetime'].max()]['open_interest']
-            ).reset_index(level=0, drop=True) if not sum else \
-                df[['open_interest', 'datetime']].groupby(df.index).apply(
-                    lambda x: x['open_interest'].sum()
-                )
+        if 'datetime' in df.columns:
+            df = df.sort_values('datetime', kind='stable')
+        else:
+            df = df.sort_index(kind='stable')
+        aggregations = {'open': 'first', 'high': 'max', 'low': 'min'}
+        for column in ('close', 'last', 'open_interest'):
+            if column in df:
+                aggregations[column] = 'last'
+        if 'pre_close' in df:
+            aggregations['pre_close'] = 'first'
+        for column in ('volume', 'turnover'):
+            if column in df:
+                aggregations[column] = 'sum' if sum else 'last'
+        target_df = df.groupby('trading_date').agg(aggregations)
     return target_df
 
 
 def period_group_md_data(df: pd.DataFrame, N: int):
     df = period_mark(df, N, True, False)
-    df['period_mark'] = df['period_mark'].replace(to_replace=0, method='bfill')
+    df['period_mark'] = df['period_mark'].where(df['period_mark'].ne(0)).bfill()
     df.dropna(subset=['period_mark'], inplace=True)
     mdv = df.groupby('period_mark').apply(
         lambda x: [
@@ -163,7 +139,7 @@ def period_group_md_data(df: pd.DataFrame, N: int):
 
 def point_group_md_data(df: pd.DataFrame, time_point: time, err: int):
     df = point_mark(df, time_point)
-    df['point_mark'] = df['point_mark'].fillna(method='bfill')
+    df['point_mark'] = df['point_mark'].bfill()
     df.dropna(subset=['point_mark'], inplace=True)
     mdv = df.groupby('point_mark').apply(
         lambda x: [
@@ -193,6 +169,7 @@ def point_group_md_data(df: pd.DataFrame, time_point: time, err: int):
 
 
 def convert_to_numpy(df: pd.DataFrame):
+    df = df.copy()
     for col in [c for c in df.columns if 'date' in c.lower() or 'time' in c.lower()]:
         df[col] = to_timestamp(df[col])
     return df.to_numpy(na_value=np.nan)

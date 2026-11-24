@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "derivx-market-data"
+version = "0.1.0"
+description = "DataFrame utilities for market data aggregation"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {file = "LICENSE"}
+dependencies = ["numpy>=1.26,<3", "pandas>=2.2,<3", "numba>=0.61,<1", "scikit-learn>=1.5,<2"]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["derivx_market_data*"]
